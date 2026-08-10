@@ -45,37 +45,67 @@ pipeline {
                 REM 1. Try the official py launcher first (most reliable on Windows)
                 py -3 --version >nul 2>&1
                 if %ERRORLEVEL% EQU 0 (
-                    set "FOUND_PYTHON=py -3"
-                    echo Found Python via py launcher
+                    for /f "delims=" %%P in ('py -3 -c "import sys;print(sys.executable)"') do set "FOUND_PYTHON=%%P"
+                    echo Found Python via py launcher: %FOUND_PYTHON%
                     goto :python_found
                 )
 
-                REM 2. Try common hardcoded install paths
-                if exist "C:\\Python312\\python.exe" (
-                    set "FOUND_PYTHON=C:\\Python312\\python.exe"
-                    echo Found Python at C:\\Python312\\python.exe
-                    goto :python_found
+                REM 2. Search Program Files (this is where "Install for all users" puts it)
+                for /d %%D in ("C:\\Program Files\\Python*") do (
+                    if exist "%%D\\python.exe" (
+                        set "FOUND_PYTHON=%%D\\python.exe"
+                        echo Found Python at %%D\\python.exe
+                        goto :python_found
+                    )
                 )
-                if exist "C:\\Python311\\python.exe" (
-                    set "FOUND_PYTHON=C:\\Python311\\python.exe"
-                    echo Found Python at C:\\Python311\\python.exe
-                    goto :python_found
-                )
-                if exist "%LOCALAPPDATA%\\Programs\\Python\\Python312\\python.exe" (
-                    set "FOUND_PYTHON=%LOCALAPPDATA%\\Programs\\Python\\Python312\\python.exe"
-                    echo Found Python in LOCALAPPDATA
-                    goto :python_found
+                for /d %%D in ("C:\\Program Files (x86)\\Python*") do (
+                    if exist "%%D\\python.exe" (
+                        set "FOUND_PYTHON=%%D\\python.exe"
+                        echo Found Python at %%D\\python.exe
+                        goto :python_found
+                    )
                 )
 
-                echo ERROR: A real Python installation was not found.
+                REM 3. Search C:\\PythonXX (older-style installs)
+                for /d %%D in ("C:\\Python*") do (
+                    if exist "%%D\\python.exe" (
+                        set "FOUND_PYTHON=%%D\\python.exe"
+                        echo Found Python at %%D\\python.exe
+                        goto :python_found
+                    )
+                )
+
+                REM 4. Search per-user install location (only works if Jenkins runs as that user)
+                for /d %%D in ("%LOCALAPPDATA%\\Programs\\Python\\Python*") do (
+                    if exist "%%D\\python.exe" (
+                        set "FOUND_PYTHON=%%D\\python.exe"
+                        echo Found Python in LOCALAPPDATA: %%D\\python.exe
+                        goto :python_found
+                    )
+                )
+
+                REM 5. Last resort - check the registry (covers unusual custom install paths)
+                for /f "tokens=2,*" %%A in ('reg query "HKLM\\SOFTWARE\\Python\\PythonCore" /s /v ExecutablePath 2^>nul ^| findstr /i "ExecutablePath"') do (
+                    if exist "%%B" (
+                        set "FOUND_PYTHON=%%B"
+                        echo Found Python via registry: %%B
+                        goto :python_found
+                    )
+                )
+
+                echo ERROR: A real Python installation was not found anywhere checked.
+                echo Checked: py launcher, Program Files, C:\\PythonXX, LOCALAPPDATA, registry.
                 echo The WindowsApps python.exe alias is not a valid interpreter.
-                echo Install Python from python.org and ensure "Add python.exe to PATH" is checked,
-                echo or set PYTHON_HOME in this Jenkinsfile to the correct install path.
+                echo Install Python from python.org with "Add python.exe to PATH" and
+                echo "Install for all users" both checked, then re-run this job.
                 exit /b 1
 
                 :python_found
                 echo Using: %FOUND_PYTHON%
-                %FOUND_PYTHON% --version
+                "%FOUND_PYTHON%" --version
+                REM Persist the discovered path to a file so later stages (separate
+                REM cmd.exe processes) don't have to re-discover it from scratch.
+                echo %FOUND_PYTHON%> python_path.txt
                 echo PYTHON_OK
                 '''
             }
@@ -88,17 +118,18 @@ pipeline {
                 echo CREATING VIRTUAL ENVIRONMENT
                 echo ==========================================
 
-                py -3 --version >nul 2>&1
-                if %ERRORLEVEL% EQU 0 (
-                    py -3 -m venv %VENV_DIR%
-                ) else if exist "C:\\Python312\\python.exe" (
-                    C:\\Python312\\python.exe -m venv %VENV_DIR%
-                ) else if exist "C:\\Python311\\python.exe" (
-                    C:\\Python311\\python.exe -m venv %VENV_DIR%
-                ) else (
-                    echo ERROR: No valid Python interpreter found for venv creation.
+                if not exist python_path.txt (
+                    echo ERROR: python_path.txt not found - Verify Python stage did not run or failed.
                     exit /b 1
                 )
+                set /p FOUND_PYTHON=<python_path.txt
+
+                if not exist "%FOUND_PYTHON%" (
+                    echo ERROR: Recorded Python path no longer exists: %FOUND_PYTHON%
+                    exit /b 1
+                )
+
+                "%FOUND_PYTHON%" -m venv %VENV_DIR%
 
                 if not exist "%VENV_DIR%\\Scripts\\python.exe" (
                     echo ERROR: Virtual environment was not created successfully.
