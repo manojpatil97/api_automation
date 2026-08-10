@@ -7,6 +7,12 @@ pipeline {
         // PYTHON_HOME = "C:\\Python312"
         // PYTHON_HOME = "C:\\Users\\PC\\AppData\\Local\\Programs\\Python\\Python312"
         VENV_DIR = "venv"
+
+        // The Jenkins agent's PATH is missing C:\Windows\System32 (exit code 9009
+        // on 'where cmd.exe' proves this - where.exe itself couldn't be resolved).
+        // Force the standard Windows system directories back onto PATH for every
+        // stage in this pipeline, in addition to whatever the agent already has.
+        PATH = "C:\\Windows\\System32;C:\\Windows;C:\\Windows\\System32\\Wbem;C:\\Windows\\System32\\WindowsPowerShell\\v1.0;${env.PATH}"
     }
 
     stages {
@@ -18,7 +24,10 @@ pipeline {
                 echo VERIFYING WINDOWS CMD
                 echo ==========================================
                 echo PATH=%PATH%
-                where cmd.exe
+                REM Use cmd's built-in 'ver' instead of the external where.exe -
+                REM builtins work even if PATH is broken, since cmd.exe itself is
+                REM already running and doesn't need to resolve them externally.
+                ver
                 echo CMD_OK
                 '''
             }
