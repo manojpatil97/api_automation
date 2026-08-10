@@ -2,14 +2,13 @@ pipeline {
     agent any
 
     environment {
-        PATH = "C:\\Windows\\System32;C:\\Windows;C:\\Windows\\System32\\Wbem;C:\\Users\\PC\\AppData\\Local\\Microsoft\\WindowsApps;${env.PATH}"
+        PATH = "C:\\Windows\\System32;C:\\Windows;C:\\Windows\\System32\\Wbem;${env.PATH}"
         COMSPEC = "C:\\Windows\\System32\\cmd.exe"
-        PYTHON = "C:\\Users\\PC\\AppData\\Local\\Microsoft\\WindowsApps\\python.exe"
     }
 
     stages {
 
-        stage('Verify CMD') {
+        stage('Verify Windows CMD') {
             steps {
                 bat '''
                     echo ==========================================
@@ -22,18 +21,64 @@ pipeline {
             }
         }
 
+        stage('Find Real Python') {
+            steps {
+                script {
+                    def pythonPath = bat(
+                        returnStdout: true,
+                        script: '''
+                            @echo off
+                            set "FOUND="
+
+                            if exist "C:\Program Files\Python313\python.exe" set "FOUND=C:\Program Files\Python313\python.exe"
+                            if exist "C:\Program Files\Python312\python.exe" set "FOUND=C:\Program Files\Python312\python.exe"
+                            if exist "C:\Program Files\Python311\python.exe" set "FOUND=C:\Program Files\Python311\python.exe"
+                            if exist "C:\Program Files\Python310\python.exe" set "FOUND=C:\Program Files\Python310\python.exe"
+
+                            if exist "C:\Users\PC\AppData\Local\Programs\Python\Python313\python.exe" set "FOUND=C:\Users\PC\AppData\Local\Programs\Python\Python313\python.exe"
+                            if exist "C:\Users\PC\AppData\Local\Programs\Python\Python312\python.exe" set "FOUND=C:\Users\PC\AppData\Local\Programs\Python\Python312\python.exe"
+                            if exist "C:\Users\PC\AppData\Local\Programs\Python\Python311\python.exe" set "FOUND=C:\Users\PC\AppData\Local\Programs\Python\Python311\python.exe"
+                            if exist "C:\Users\PC\AppData\Local\Programs\Python\Python310\python.exe" set "FOUND=C:\Users\PC\AppData\Local\Programs\Python\Python310\python.exe"
+
+                            if defined FOUND (
+                                echo %FOUND%
+                                exit /b 0
+                            )
+
+                            for /f "delims=" %%P in ('where py.exe 2^>nul') do (
+                                echo %%P
+                                exit /b 0
+                            )
+
+                            for /f "delims=" %%P in ('where python.exe 2^>nul') do (
+                                echo %%P
+                                exit /b 0
+                            )
+
+                            echo NO_REAL_PYTHON_FOUND
+                            exit /b 1
+                        '''
+                    ).trim()
+
+                    if (!pythonPath || pythonPath == 'NO_REAL_PYTHON_FOUND') {
+                        error('No real Python installation was found for the Jenkins Local System account. The WindowsApps python.exe path is only a Microsoft Store alias and is not a usable Python installation for this Jenkins service.')
+                    }
+
+                    env.PYTHON = pythonPath
+                    echo "Using Python: ${env.PYTHON}"
+                }
+            }
+        }
+
         stage('Verify Python') {
             steps {
                 bat '''
                     echo ==========================================
                     echo VERIFYING PYTHON
                     echo ==========================================
-                    if not exist "%PYTHON%" (
-                        echo ERROR: Python executable was not found:
-                        echo %PYTHON%
-                        exit /b 1
-                    )
+                    echo Python: %PYTHON%
                     "%PYTHON%" --version
+                    if errorlevel 1 exit /b 1
                 '''
             }
         }
@@ -45,18 +90,16 @@ pipeline {
                     echo CREATING VIRTUAL ENVIRONMENT
                     echo ==========================================
 
-                    if exist "venv" (
-                        rmdir /s /q "venv"
-                    )
+                    if exist "venv" rmdir /s /q "venv"
 
                     "%PYTHON%" -m venv venv
 
-                    if not exist "venv/Scripts/python.exe" (
-                        echo ERROR: Virtual environment was not created.
+                    if not exist "venv\Scripts\python.exe" (
+                        echo ERROR: Virtual environment creation failed.
                         exit /b 1
                     )
 
-                    venv/Scripts/python.exe --version
+                    venv\Scripts\python.exe --version
                 '''
             }
         }
@@ -68,8 +111,8 @@ pipeline {
                     echo INSTALLING DEPENDENCIES
                     echo ==========================================
 
-                    venv/Scripts/python.exe -m pip install --upgrade pip
-                    venv/Scripts/python.exe -m pip install -r requirements.txt
+                    venv\Scripts\python.exe -m pip install --upgrade pip
+                    venv\Scripts\python.exe -m pip install -r requirements.txt
                 '''
             }
         }
@@ -81,10 +124,10 @@ pipeline {
                     echo RUNNING API TESTS
                     echo ==========================================
 
-                    if not exist "reports/allure-report" mkdir "reports/allure-report"
-                    if not exist "reports/html-report" mkdir "reports/html-report"
+                    if not exist "reports\allure-report" mkdir "reports\allure-report"
+                    if not exist "reports\html-report" mkdir "reports\html-report"
 
-                    venv/Scripts/python.exe -m pytest tests --html=reports/html-report/report.html --self-contained-html --alluredir=reports/allure-report
+                    venv\Scripts\python.exe -m pytest tests --html=reports\html-report\report.html --self-contained-html --alluredir=reports\allure-report
                 '''
             }
         }
