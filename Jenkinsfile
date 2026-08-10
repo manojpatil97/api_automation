@@ -1,17 +1,9 @@
 pipeline {
     agent any
 
-    /*
-     * Jenkins is running as Local System and its service PATH cannot find cmd.exe.
-     * These variables force Jenkins to use the real Windows CMD.
-     */
     environment {
         PATH = "C:\\Windows\\System32;C:\\Windows;C:\\Windows\\System32\\Wbem;C:\\Users\\PC\\AppData\\Local\\Microsoft\\WindowsApps;${env.PATH}"
         COMSPEC = "C:\\Windows\\System32\\cmd.exe"
-
-        /*
-         * Python path supplied for this machine.
-         */
         PYTHON = "C:\\Users\\PC\\AppData\\Local\\Microsoft\\WindowsApps\\python.exe"
     }
 
@@ -41,7 +33,6 @@ pipeline {
                         echo %PYTHON%
                         exit /b 1
                     )
-
                     "%PYTHON%" --version
                 '''
             }
@@ -60,12 +51,12 @@ pipeline {
 
                     "%PYTHON%" -m venv venv
 
-                    if not exist "venv\Scripts\python.exe" (
+                    if not exist "venv/Scripts/python.exe" (
                         echo ERROR: Virtual environment was not created.
                         exit /b 1
                     )
 
-                    venv\Scripts\python.exe --version
+                    venv/Scripts/python.exe --version
                 '''
             }
         }
@@ -77,8 +68,8 @@ pipeline {
                     echo INSTALLING DEPENDENCIES
                     echo ==========================================
 
-                    venv\Scripts\python.exe -m pip install --upgrade pip
-                    venv\Scripts\python.exe -m pip install -r requirements.txt
+                    venv/Scripts/python.exe -m pip install --upgrade pip
+                    venv/Scripts/python.exe -m pip install -r requirements.txt
                 '''
             }
         }
@@ -90,13 +81,10 @@ pipeline {
                     echo RUNNING API TESTS
                     echo ==========================================
 
-                    if not exist "reports\allure-report" mkdir "reports\allure-report"
-                    if not exist "reports\html-report" mkdir "reports\html-report"
+                    if not exist "reports/allure-report" mkdir "reports/allure-report"
+                    if not exist "reports/html-report" mkdir "reports/html-report"
 
-                    venv\Scripts\python.exe -m pytest tests ^
-                        --html=reports\html-report\report.html ^
-                        --self-contained-html ^
-                        --alluredir=reports\allure-report
+                    venv/Scripts/python.exe -m pytest tests --html=reports/html-report/report.html --self-contained-html --alluredir=reports/allure-report
                 '''
             }
         }
