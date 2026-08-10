@@ -1,22 +1,16 @@
 pipeline {
     agent any
 
-    environment {
-        PATH = "C:/Windows/System32;C:/Windows;C:/Windows/System32/Wbem;${env.PATH}"
-        COMSPEC = "C:/Windows/System32/cmd.exe"
-    }
-
     stages {
 
-        stage('Verify CMD') {
+        stage('Verify Windows') {
             steps {
                 bat '''
                     echo ==========================================
-                    echo VERIFYING WINDOWS CMD
+                    echo VERIFYING WINDOWS
                     echo ==========================================
-                    echo COMSPEC=%COMSPEC%
                     where cmd
-                    "%COMSPEC%" /c "echo CMD_TEST_OK"
+                    echo CMD_OK
                 '''
             }
         }
@@ -24,74 +18,45 @@ pipeline {
         stage('Find Python') {
             steps {
                 script {
-                    def result = bat(
+                    def pythonCheck = bat(
                         returnStatus: true,
                         script: '''
                             @echo off
-                            echo Checking Python launcher...
-                            where py
-                            if errorlevel 1 exit /b 1
-                            py -3 --version
-                            if errorlevel 1 exit /b 1
-                            exit /b 0
+                            py -3 --version >nul 2>&1
+                            exit /b %ERRORLEVEL%
                         '''
                     )
 
-                    if (result == 0) {
-                        env.PYTHON_COMMAND = 'py -3'
+                    if (pythonCheck == 0) {
+                        env.PYTHON_CMD = 'py -3'
                     } else {
-                        def pythonResult = bat(
+                        def pythonCheck2 = bat(
                             returnStatus: true,
                             script: '''
                                 @echo off
-                                echo Checking Python executable...
-                                where python
-                                if errorlevel 1 exit /b 1
-                                python --version
-                                if errorlevel 1 exit /b 1
-                                exit /b 0
+                                python --version >nul 2>&1
+                                exit /b %ERRORLEVEL%
                             '''
                         )
 
-                        if (pythonResult == 0) {
-                            env.PYTHON_COMMAND = 'python'
+                        if (pythonCheck2 == 0) {
+                            env.PYTHON_CMD = 'python'
                         } else {
-                            error('Python 3 was not found for the Jenkins service account. Install Python from python.org and enable the Python launcher, then restart Jenkins.')
+                            error('Python is not available to the Jenkins service account. Install Python for all users or configure the Jenkins service to run under your Windows user account.')
                         }
                     }
 
-                    echo "Python command selected: ${env.PYTHON_COMMAND}"
+                    echo "Python command: ${env.PYTHON_CMD}"
                 }
-            }
-        }
-
-        stage('Verify Python') {
-            steps {
-                bat '''
-                    echo ==========================================
-                    echo VERIFYING PYTHON
-                    echo ==========================================
-                    %PYTHON_COMMAND% --version
-                '''
             }
         }
 
         stage('Create Virtual Environment') {
             steps {
                 bat '''
-                    echo ==========================================
-                    echo CREATING VIRTUAL ENVIRONMENT
-                    echo ==========================================
-
-                    if exist "venv" rmdir /s /q "venv"
-
-                    %PYTHON_COMMAND% -m venv venv
-
-                    if not exist "venv/Scripts/python.exe" (
-                        echo ERROR: Virtual environment creation failed.
-                        exit /b 1
-                    )
-
+                    if exist venv rmdir /s /q venv
+                    %PYTHON_CMD% -m venv venv
+                    if not exist venv/Scripts/python.exe exit /b 1
                     venv/Scripts/python.exe --version
                 '''
             }
@@ -100,10 +65,6 @@ pipeline {
         stage('Install Dependencies') {
             steps {
                 bat '''
-                    echo ==========================================
-                    echo INSTALLING DEPENDENCIES
-                    echo ==========================================
-
                     venv/Scripts/python.exe -m pip install --upgrade pip
                     venv/Scripts/python.exe -m pip install -r requirements.txt
                 '''
@@ -113,12 +74,9 @@ pipeline {
         stage('Run API Tests') {
             steps {
                 bat '''
-                    echo ==========================================
-                    echo RUNNING API TESTS
-                    echo ==========================================
-
-                    if not exist "reports/allure-report" mkdir "reports/allure-report"
-                    if not exist "reports/html-report" mkdir "reports/html-report"
+                    if not exist reports mkdir reports
+                    if not exist reports/allure-report mkdir reports/allure-report
+                    if not exist reports/html-report mkdir reports/html-report
 
                     venv/Scripts/python.exe -m pytest tests --html=reports/html-report/report.html --self-contained-html --alluredir=reports/allure-report
                 '''
