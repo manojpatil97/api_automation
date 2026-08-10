@@ -3,60 +3,76 @@ pipeline {
     agent any
 
     environment {
+
+        PYTHON = 'C:\\Program Files\\Python314\\python.exe'
+
+        PYTHON_SCRIPTS = 'C:\\Program Files\\Python314\\Scripts'
+
+        PATH = "C:\\Windows\\System32;C:\\Windows;C:\\Program Files\\Python314;C:\\Program Files\\Python314\\Scripts;${env.PATH}"
+
         PYTHONUNBUFFERED = '1'
-
-        // Windows system paths
-        PATH = "C:\\Windows\\System32;C:\\Windows;${env.PATH}"
-
-        // Change this if your Python is installed somewhere else
-        PYTHON_HOME = "C:\\Program Files\\Python314"
     }
 
     stages {
 
         stage('Verify Environment') {
             steps {
-                echo 'Checking Windows environment...'
+                echo '=========================================='
+                echo 'VERIFYING JENKINS ENVIRONMENT'
+                echo '=========================================='
 
                 bat 'where cmd'
-                bat 'where python'
-                bat 'python --version'
-                bat 'python -m pip --version'
+
+                bat '''
+                    if exist "%PYTHON%" (
+                        echo Python found at:
+                        echo %PYTHON%
+                    ) else (
+                        echo ERROR: Python was not found at %PYTHON%
+                        exit /b 1
+                    )
+                '''
+
+                bat '"%PYTHON%" --version'
+
+                bat '"%PYTHON%" -m pip --version'
             }
         }
 
         stage('Install Dependencies') {
             steps {
-                echo 'Installing Python dependencies...'
+                echo '=========================================='
+                echo 'INSTALLING PYTHON DEPENDENCIES'
+                echo '=========================================='
 
-                bat 'python -m pip install --upgrade pip'
-                bat 'python -m pip install -r requirements.txt'
-            }
-        }
+                bat '"%PYTHON%" -m pip install --upgrade pip'
 
-        stage('Install Playwright') {
-            steps {
-                echo 'Installing Playwright browsers...'
-
-                bat 'python -m playwright install chromium'
+                bat '"%PYTHON%" -m pip install -r requirements.txt'
             }
         }
 
         stage('Create Report Directory') {
             steps {
-                echo 'Creating report directories...'
+                echo '=========================================='
+                echo 'CREATING REPORT DIRECTORIES'
+                echo '=========================================='
 
-                bat 'if not exist reports\\html mkdir reports\\html'
-                bat 'if not exist allure-results mkdir allure-results'
+                bat '''
+                    if not exist "reports" mkdir "reports"
+                    if not exist "reports\\html" mkdir "reports\\html"
+                    if not exist "allure-results" mkdir "allure-results"
+                '''
             }
         }
 
         stage('Run API Tests') {
             steps {
-                echo 'Running API automation tests...'
+                echo '=========================================='
+                echo 'RUNNING API AUTOMATION TESTS'
+                echo '=========================================='
 
                 bat '''
-                    python -m pytest tests ^
+                    "%PYTHON%" -m pytest tests ^
                     --html=reports\\html\\report.html ^
                     --self-contained-html ^
                     --alluredir=allure-results ^
@@ -70,7 +86,9 @@ pipeline {
 
         always {
 
-            echo 'Publishing HTML report...'
+            echo '=========================================='
+            echo 'PUBLISHING HTML REPORT'
+            echo '=========================================='
 
             publishHTML([
                 allowMissing: true,
@@ -79,7 +97,7 @@ pipeline {
                 reportDir: 'reports/html',
                 reportFiles: 'report.html',
                 reportName: 'Playwright API HTML Report',
-                reportTitles: 'API Automation Report'
+                reportTitles: 'API Automation Test Report'
             ])
 
             archiveArtifacts(
@@ -95,15 +113,15 @@ pipeline {
 
         success {
             echo '=========================================='
-            echo 'API AUTOMATION TESTS PASSED'
+            echo 'API AUTOMATION PIPELINE PASSED'
             echo '=========================================='
         }
 
         failure {
             echo '=========================================='
-            echo 'API AUTOMATION TESTS FAILED'
-            echo 'Please check the Jenkins console and HTML report.'
+            echo 'API AUTOMATION PIPELINE FAILED'
             echo '=========================================='
+            echo 'Please check the test execution logs above.'
         }
     }
 }
