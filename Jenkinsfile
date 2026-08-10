@@ -2,13 +2,13 @@ pipeline {
     agent any
 
     environment {
-        PATH = "C:\\Windows\\System32;C:\\Windows;C:\\Windows\\System32\\Wbem;${env.PATH}"
-        COMSPEC = "C:\\Windows\\System32\\cmd.exe"
+        PATH = "C:/Windows/System32;C:/Windows;C:/Windows/System32/Wbem;${env.PATH}"
+        COMSPEC = "C:/Windows/System32/cmd.exe"
     }
 
     stages {
 
-        stage('Verify Windows CMD') {
+        stage('Verify CMD') {
             steps {
                 bat '''
                     echo ==========================================
@@ -21,51 +21,46 @@ pipeline {
             }
         }
 
-        stage('Find Real Python') {
+        stage('Find Python') {
             steps {
                 script {
-                    def pythonPath = bat(
-                        returnStdout: true,
+                    def result = bat(
+                        returnStatus: true,
                         script: '''
                             @echo off
-                            set "FOUND="
-
-                            if exist "C:\Program Files\Python313\python.exe" set "FOUND=C:\Program Files\Python313\python.exe"
-                            if exist "C:\Program Files\Python312\python.exe" set "FOUND=C:\Program Files\Python312\python.exe"
-                            if exist "C:\Program Files\Python311\python.exe" set "FOUND=C:\Program Files\Python311\python.exe"
-                            if exist "C:\Program Files\Python310\python.exe" set "FOUND=C:\Program Files\Python310\python.exe"
-
-                            if exist "C:\Users\PC\AppData\Local\Programs\Python\Python313\python.exe" set "FOUND=C:\Users\PC\AppData\Local\Programs\Python\Python313\python.exe"
-                            if exist "C:\Users\PC\AppData\Local\Programs\Python\Python312\python.exe" set "FOUND=C:\Users\PC\AppData\Local\Programs\Python\Python312\python.exe"
-                            if exist "C:\Users\PC\AppData\Local\Programs\Python\Python311\python.exe" set "FOUND=C:\Users\PC\AppData\Local\Programs\Python\Python311\python.exe"
-                            if exist "C:\Users\PC\AppData\Local\Programs\Python\Python310\python.exe" set "FOUND=C:\Users\PC\AppData\Local\Programs\Python\Python310\python.exe"
-
-                            if defined FOUND (
-                                echo %FOUND%
-                                exit /b 0
-                            )
-
-                            for /f "delims=" %%P in ('where py.exe 2^>nul') do (
-                                echo %%P
-                                exit /b 0
-                            )
-
-                            for /f "delims=" %%P in ('where python.exe 2^>nul') do (
-                                echo %%P
-                                exit /b 0
-                            )
-
-                            echo NO_REAL_PYTHON_FOUND
-                            exit /b 1
+                            echo Checking Python launcher...
+                            where py
+                            if errorlevel 1 exit /b 1
+                            py -3 --version
+                            if errorlevel 1 exit /b 1
+                            exit /b 0
                         '''
-                    ).trim()
+                    )
 
-                    if (!pythonPath || pythonPath == 'NO_REAL_PYTHON_FOUND') {
-                        error('No real Python installation was found for the Jenkins Local System account. The WindowsApps python.exe path is only a Microsoft Store alias and is not a usable Python installation for this Jenkins service.')
+                    if (result == 0) {
+                        env.PYTHON_COMMAND = 'py -3'
+                    } else {
+                        def pythonResult = bat(
+                            returnStatus: true,
+                            script: '''
+                                @echo off
+                                echo Checking Python executable...
+                                where python
+                                if errorlevel 1 exit /b 1
+                                python --version
+                                if errorlevel 1 exit /b 1
+                                exit /b 0
+                            '''
+                        )
+
+                        if (pythonResult == 0) {
+                            env.PYTHON_COMMAND = 'python'
+                        } else {
+                            error('Python 3 was not found for the Jenkins service account. Install Python from python.org and enable the Python launcher, then restart Jenkins.')
+                        }
                     }
 
-                    env.PYTHON = pythonPath
-                    echo "Using Python: ${env.PYTHON}"
+                    echo "Python command selected: ${env.PYTHON_COMMAND}"
                 }
             }
         }
@@ -76,9 +71,7 @@ pipeline {
                     echo ==========================================
                     echo VERIFYING PYTHON
                     echo ==========================================
-                    echo Python: %PYTHON%
-                    "%PYTHON%" --version
-                    if errorlevel 1 exit /b 1
+                    %PYTHON_COMMAND% --version
                 '''
             }
         }
@@ -92,14 +85,14 @@ pipeline {
 
                     if exist "venv" rmdir /s /q "venv"
 
-                    "%PYTHON%" -m venv venv
+                    %PYTHON_COMMAND% -m venv venv
 
-                    if not exist "venv\Scripts\python.exe" (
+                    if not exist "venv/Scripts/python.exe" (
                         echo ERROR: Virtual environment creation failed.
                         exit /b 1
                     )
 
-                    venv\Scripts\python.exe --version
+                    venv/Scripts/python.exe --version
                 '''
             }
         }
@@ -111,8 +104,8 @@ pipeline {
                     echo INSTALLING DEPENDENCIES
                     echo ==========================================
 
-                    venv\Scripts\python.exe -m pip install --upgrade pip
-                    venv\Scripts\python.exe -m pip install -r requirements.txt
+                    venv/Scripts/python.exe -m pip install --upgrade pip
+                    venv/Scripts/python.exe -m pip install -r requirements.txt
                 '''
             }
         }
@@ -124,10 +117,10 @@ pipeline {
                     echo RUNNING API TESTS
                     echo ==========================================
 
-                    if not exist "reports\allure-report" mkdir "reports\allure-report"
-                    if not exist "reports\html-report" mkdir "reports\html-report"
+                    if not exist "reports/allure-report" mkdir "reports/allure-report"
+                    if not exist "reports/html-report" mkdir "reports/html-report"
 
-                    venv\Scripts\python.exe -m pytest tests --html=reports\html-report\report.html --self-contained-html --alluredir=reports\allure-report
+                    venv/Scripts/python.exe -m pytest tests --html=reports/html-report/report.html --self-contained-html --alluredir=reports/allure-report
                 '''
             }
         }
@@ -163,15 +156,11 @@ pipeline {
         }
 
         success {
-            echo '=========================================='
             echo 'API AUTOMATION PIPELINE PASSED'
-            echo '=========================================='
         }
 
         failure {
-            echo '=========================================='
             echo 'API AUTOMATION PIPELINE FAILED'
-            echo '=========================================='
         }
     }
 }
