@@ -1,17 +1,25 @@
 pipeline {
     agent any
 
+    parameters {
+        choice(
+            name: 'ENV',
+            choices: ['QA', 'UAT', 'PROD'],
+            description: 'Select Environment'
+        )
+        choice(
+            name: 'TEST_SUITE',
+            choices: ['all', 'smoke', 'regression'],
+            description: 'Select Test Suite'
+        )
+    }
+
     environment {
-        // Adjust this to match a real Python install on your Jenkins agent.
-        // Common locations - uncomment/edit the one that matches your machine:
-        // PYTHON_HOME = "C:\\Python312"
-        // PYTHON_HOME = "C:\\Users\\PC\\AppData\\Local\\Programs\\Python\\Python312"
         VENV_DIR = "venv"
 
-        // The Jenkins agent's PATH is missing C:\Windows\System32 (exit code 9009
-        // on 'where cmd.exe' proves this - where.exe itself couldn't be resolved).
-        // Force the standard Windows system directories back onto PATH for every
-        // stage in this pipeline, in addition to whatever the agent already has.
+        // The Jenkins agent's PATH has been observed missing C:\Windows\System32
+        // on this machine - force the standard Windows system directories back
+        // onto PATH for every stage, in addition to whatever the agent already has.
         PATH = "C:\\Windows\\System32;C:\\Windows;C:\\Windows\\System32\\Wbem;C:\\Windows\\System32\\WindowsPowerShell\\v1.0;${env.PATH}"
     }
 
@@ -50,8 +58,17 @@ pipeline {
                 if defined FOUND_PYTHON goto :python_found
 
                 REM 1b. Same new-style layout, generalized with a wildcard so a future
-                REM Python version bump (3.15, etc.) doesn't require editing this file again.
+                REM Python version bump doesn't require editing this file again.
                 for /f "delims=" %%D in ('dir /b /ad "C:\\Users\\PC\\AppData\\Local\\Python\\pythoncore-*" 2^>nul') do if exist "C:\\Users\\PC\\AppData\\Local\\Python\\%%D\\python.exe" set "FOUND_PYTHON=C:\\Users\\PC\\AppData\\Local\\Python\\%%D\\python.exe"
+                if defined FOUND_PYTHON echo Found Python at %FOUND_PYTHON%
+                if defined FOUND_PYTHON goto :python_found
+
+                REM 1c. Older per-user layout used by other Windows accounts/machines
+                REM (e.g. Admin\\AppData\\Local\\Programs\\Python\\PythonXXX) - covers
+                REM this pipeline running on a different agent than the one we debugged.
+                for /f "delims=" %%U in ('dir /b "C:\\Users" 2^>nul') do (
+                    for /f "delims=" %%D in ('dir /b /ad "C:\\Users\\%%U\\AppData\\Local\\Programs\\Python\\Python*" 2^>nul') do if exist "C:\\Users\\%%U\\AppData\\Local\\Programs\\Python\\%%D\\python.exe" set "FOUND_PYTHON=C:\\Users\\%%U\\AppData\\Local\\Programs\\Python\\%%D\\python.exe"
+                )
                 if defined FOUND_PYTHON echo Found Python at %FOUND_PYTHON%
                 if defined FOUND_PYTHON goto :python_found
 
@@ -62,8 +79,6 @@ pipeline {
                 if defined FOUND_PYTHON goto :python_found
 
                 REM 3. Search Program Files (this is where "Install for all users" puts it)
-                REM Using dir/b + for/f instead of for /d with a block body, since nested
-                REM parenthesized blocks break badly if any echoed text contains ( or ).
                 for /f "delims=" %%D in ('dir /b /ad "C:\\Program Files\\Python*" 2^>nul') do if exist "C:\\Program Files\\%%D\\python.exe" set "FOUND_PYTHON=C:\\Program Files\\%%D\\python.exe"
                 if defined FOUND_PYTHON echo Found Python at %FOUND_PYTHON%
                 if defined FOUND_PYTHON goto :python_found
@@ -77,18 +92,12 @@ pipeline {
                 if defined FOUND_PYTHON echo Found Python at %FOUND_PYTHON%
                 if defined FOUND_PYTHON goto :python_found
 
-                REM 5. Search old-style per-user install location (pre-3.14 layout)
-                for /f "delims=" %%D in ('dir /b /ad "%LOCALAPPDATA%\\Programs\\Python\\Python*" 2^>nul') do if exist "%LOCALAPPDATA%\\Programs\\Python\\%%D\\python.exe" set "FOUND_PYTHON=%LOCALAPPDATA%\\Programs\\Python\\%%D\\python.exe"
-                if defined FOUND_PYTHON echo Found Python at %FOUND_PYTHON%
-                if defined FOUND_PYTHON goto :python_found
-
-                REM 6. Last resort - check the registry (covers unusual custom install paths)
+                REM 5. Last resort - check the registry (covers unusual custom install paths)
                 for /f "tokens=2,*" %%A in ('reg query "HKLM\\SOFTWARE\\Python\\PythonCore" /s /v ExecutablePath 2^>nul ^| findstr /i "ExecutablePath"') do if exist "%%B" set "FOUND_PYTHON=%%B"
                 if defined FOUND_PYTHON echo Found Python via registry: %FOUND_PYTHON%
                 if defined FOUND_PYTHON goto :python_found
 
                 echo ERROR: A real Python installation was not found anywhere checked.
-                echo Checked: confirmed path, py launcher, Program Files, Program Files x86, C colon Python folders, old-style LOCALAPPDATA, registry.
                 echo Diagnostic - anything Python-related under Program Files:
                 dir /b "C:\\Program Files" 2>nul | findstr /i python
                 dir /b "C:\\Program Files (x86)" 2>nul | findstr /i python
@@ -97,15 +106,13 @@ pipeline {
                 :python_found
                 echo Using: %FOUND_PYTHON%
                 "%FOUND_PYTHON%" --version
-                REM Persist the discovered path to a file so later stages (separate
-                REM cmd.exe processes) don't have to re-discover it from scratch.
                 echo %FOUND_PYTHON%> "%WORKSPACE%\\python_path.txt"
                 echo PYTHON_OK
                 '''
             }
         }
 
-        stage('Create Virtual Environment') {
+        stage('Create Venv') {
             steps {
                 bat '''
                 echo ==========================================
@@ -144,15 +151,13 @@ pipeline {
                 set "PROJECT_DIR="
 
                 REM requirements.txt may be at the workspace root, or nested inside a
-                REM wrapper folder (e.g. "Playwright_API_Automation\\requirements.txt")
-                REM depending on how the repo is laid out - search recursively instead
-                REM of assuming the root, and use whatever directory contains it.
+                REM wrapper folder depending on how the repo is laid out - search
+                REM recursively instead of assuming the root.
                 for /f "delims=" %%F in ('dir /s /b "%WORKSPACE%\\requirements.txt" 2^>nul') do set "PROJECT_DIR=%%~dpF"
 
                 if not defined PROJECT_DIR (
                     echo WARNING: requirements.txt not found anywhere in the workspace.
-                    echo Falling back to workspace root - dependency install will likely be skipped.
-                    echo Contents of workspace root for reference:
+                    echo Falling back to workspace root.
                     dir /b "%WORKSPACE%"
                     set "PROJECT_DIR=%WORKSPACE%\\"
                 )
@@ -181,46 +186,145 @@ pipeline {
                     echo WARNING: No requirements.txt found at %PROJECT_DIR% - skipping dependency install.
                 )
 
-                REM This project uses playwright's API request context (see conftest.py),
-                REM which still needs its driver installed even though no browser UI is
-                REM being driven - this step commonly gets missed and causes cryptic
-                REM "Executable doesn't exist" errors at test time.
-                playwright install
+                REM NOTE: playwright's browser download ("playwright install") is
+                REM intentionally NOT run here. This project's conftest.py only uses
+                REM sync_playwright().request.new_context() for pure API testing - it
+                REM never launches a browser, so no Chromium/Firefox/WebKit download is
+                REM needed. Attempting it was failing with EPERM trying to write into
+                REM SYSTEM's own profile folder (confirms Jenkins runs as SYSTEM), and
+                REM skipping it removes that failure point entirely rather than fixing
+                REM a permission problem for a 150MB download this project never uses.
+                REM If browser-driven tests are added later, uncomment the line below
+                REM (and grant SYSTEM write access to its ms-playwright cache folder,
+                REM or set PLAYWRIGHT_BROWSERS_PATH to a location SYSTEM can write to):
+                REM playwright install chromium
                 '''
             }
         }
 
-        stage('Run API Tests') {
+        stage('Set Environment') {
             steps {
-                bat '''
-                echo ==========================================
-                echo RUNNING API TESTS
-                echo ==========================================
-                set /p PROJECT_DIR=<"%WORKSPACE%\\project_dir.txt"
-
-                call "%WORKSPACE%\\%VENV_DIR%\\Scripts\\activate.bat"
-                cd /d "%PROJECT_DIR%"
-                REM pytest.ini already adds --html=reports/html/report.html --self-contained-html
-                REM --junitxml is added here on top so Jenkins' junit step can parse results too
-                pytest --junitxml=results.xml
-                '''
+                script {
+                    if (params.ENV == 'QA') {
+                        env.BASE_URL = 'https://jsonplaceholder.typicode.com'
+                    } else if (params.ENV == 'UAT') {
+                        env.BASE_URL = 'https://jsonplaceholder.typicode.com'
+                    } else {
+                        env.BASE_URL = 'https://jsonplaceholder.typicode.com'
+                    }
+                    echo "Running on ${env.BASE_URL}"
+                }
             }
         }
 
-        stage('Publish Reports') {
+        stage('Run Tests') {
             steps {
-                junit allowEmptyResults: true, testResults: '**/results.xml'
-                archiveArtifacts artifacts: '**/results.xml, **/reports/html/**', allowEmptyArchive: true
+                script {
+                    if (params.TEST_SUITE == 'all') {
+                        bat '''
+                        set /p PROJECT_DIR=<"%WORKSPACE%\\project_dir.txt"
+                        call "%WORKSPACE%\\%VENV_DIR%\\Scripts\\activate.bat"
+                        cd /d "%PROJECT_DIR%"
+                        REM -o addopts="" clears pytest.ini's own --html setting for this
+                        REM run, since it would otherwise collide with the --html flag below.
+                        python -m pytest -v -o addopts="" --html=reports/report.html --self-contained-html --alluredir=allure-results --junitxml=results.xml
+                        '''
+                    } else {
+                        bat """
+                        set /p PROJECT_DIR=<"%WORKSPACE%\\project_dir.txt"
+                        call "%WORKSPACE%\\%VENV_DIR%\\Scripts\\activate.bat"
+                        cd /d "%PROJECT_DIR%"
+                        python -m pytest -v -o addopts="" -m ${params.TEST_SUITE} --html=reports/report.html --self-contained-html --alluredir=allure-results --junitxml=results.xml
+                        """
+                    }
+                }
             }
         }
     }
 
     post {
-        failure {
-            echo 'API AUTOMATION PIPELINE FAILED'
+        always {
+            publishHTML([
+                allowMissing: true,
+                alwaysLinkToLastBuild: true,
+                keepAll: true,
+                reportDir: 'reports',
+                reportFiles: 'report.html',
+                reportName: 'API Automation Report'
+            ])
+
+            allure([
+                includeProperties: false,
+                jdk: '',
+                results: [[path: 'allure-results']]
+            ])
         }
+
         success {
-            echo 'API AUTOMATION PIPELINE SUCCEEDED'
+            mail(
+                to: 'pranjalnanda406@gmail.com',
+                from: 'pranjalnanda406@gmail.com',
+                replyTo: 'pranjalnanda406@gmail.com',
+                subject: "SUCCESS: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+                body: """
+Hello,
+
+Jenkins API Automation build completed successfully.
+
+Job Name     : ${env.JOB_NAME}
+Build Number : #${env.BUILD_NUMBER}
+Status       : SUCCESS
+
+Environment  : ${params.ENV}
+Test Suite   : ${params.TEST_SUITE}
+
+Jenkins Build:
+${env.BUILD_URL}
+
+HTML Report:
+${env.BUILD_URL}API_20Automation_20Report/
+
+Allure Report:
+${env.BUILD_URL}allure/
+
+Regards,
+Jenkins
+"""
+            )
+        }
+
+        failure {
+            mail(
+                to: 'pranjalnanda406@gmail.com',
+                from: 'pranjalnanda406@gmail.com',
+                replyTo: 'pranjalnanda406@gmail.com',
+                subject: "FAILED: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+                body: """
+Hello,
+
+Jenkins API Automation build has FAILED.
+
+Job Name     : ${env.JOB_NAME}
+Build Number : #${env.BUILD_NUMBER}
+Status       : FAILURE
+
+Environment  : ${params.ENV}
+Test Suite   : ${params.TEST_SUITE}
+
+Jenkins Build:
+${env.BUILD_URL}
+
+Please check the Jenkins Console Output for the failure details.
+
+Regards,
+Jenkins
+"""
+            )
+        }
+
+        cleanup {
+            echo 'Cleaning Jenkins workspace...'
+            deleteDir()
         }
     }
 }
