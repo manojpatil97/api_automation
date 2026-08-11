@@ -56,6 +56,15 @@ pipeline {
                         set "FOUND_PYTHON=%%D\\python.exe"
                         echo Found Python at %%D\\python.exe
                         goto :python_found
+                    ) else (
+                        REM A Python* folder exists but python.exe isn't directly in it -
+                        REM dump its contents so we can see what's actually there instead
+                        REM of continuing to guess paths blindly.
+                        echo NOTE: Found folder %%D but no python.exe directly inside it.
+                        echo Contents of %%D:
+                        dir /b "%%D" 2>nul
+                        echo Contents of %%D\\Scripts (if any):
+                        dir /b "%%D\\Scripts" 2>nul
                     )
                 )
                 for /d %%D in ("C:\\Program Files (x86)\\Python*") do (
@@ -153,6 +162,12 @@ pipeline {
                 ) else (
                     echo WARNING: No requirements.txt found - skipping dependency install.
                 )
+
+                REM This project uses playwright's API request context (see conftest.py),
+                REM which still needs its driver installed even though no browser UI is
+                REM being driven - this step commonly gets missed and causes cryptic
+                REM "Executable doesn't exist" errors at test time.
+                playwright install
                 '''
             }
         }
@@ -164,7 +179,8 @@ pipeline {
                 echo RUNNING API TESTS
                 echo ==========================================
                 call %VENV_DIR%\\Scripts\\activate.bat
-                REM Adjust this command to match your actual test runner/framework
+                REM pytest.ini already adds --html=reports/html/report.html --self-contained-html
+                REM --junitxml is added here on top so Jenkins' junit step can parse results too
                 pytest --junitxml=results.xml
                 '''
             }
@@ -173,7 +189,7 @@ pipeline {
         stage('Publish Reports') {
             steps {
                 junit allowEmptyResults: true, testResults: 'results.xml'
-                archiveArtifacts artifacts: 'results.xml', allowEmptyArchive: true
+                archiveArtifacts artifacts: 'results.xml, reports/html/**', allowEmptyArchive: true
             }
         }
     }
