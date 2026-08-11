@@ -44,69 +44,41 @@ pipeline {
 
                 REM 1. Try the official py launcher first (most reliable on Windows)
                 py -3 --version >nul 2>&1
-                if %ERRORLEVEL% EQU 0 (
-                    for /f "delims=" %%P in ('py -3 -c "import sys;print(sys.executable)"') do set "FOUND_PYTHON=%%P"
-                    echo Found Python via py launcher: %FOUND_PYTHON%
-                    goto :python_found
-                )
+                if not errorlevel 1 for /f "delims=" %%P in ('py -3 -c "import sys;print(sys.executable)" 2^>nul') do set "FOUND_PYTHON=%%P"
+                if defined FOUND_PYTHON echo Found Python via py launcher: %FOUND_PYTHON%
+                if defined FOUND_PYTHON goto :python_found
 
                 REM 2. Search Program Files (this is where "Install for all users" puts it)
-                for /d %%D in ("C:\\Program Files\\Python*") do (
-                    if exist "%%D\\python.exe" (
-                        set "FOUND_PYTHON=%%D\\python.exe"
-                        echo Found Python at %%D\\python.exe
-                        goto :python_found
-                    ) else (
-                        REM A Python* folder exists but python.exe isn't directly in it -
-                        REM dump its contents so we can see what's actually there instead
-                        REM of continuing to guess paths blindly.
-                        echo NOTE: Found folder %%D but no python.exe directly inside it.
-                        echo Contents of %%D:
-                        dir /b "%%D" 2>nul
-                        echo Contents of %%D\\Scripts (if any):
-                        dir /b "%%D\\Scripts" 2>nul
-                    )
-                )
-                for /d %%D in ("C:\\Program Files (x86)\\Python*") do (
-                    if exist "%%D\\python.exe" (
-                        set "FOUND_PYTHON=%%D\\python.exe"
-                        echo Found Python at %%D\\python.exe
-                        goto :python_found
-                    )
-                )
+                REM Using dir/b + for/f instead of for /d with a block body, since nested
+                REM parenthesized blocks break badly if any echoed text contains ( or ).
+                for /f "delims=" %%D in ('dir /b /ad "C:\\Program Files\\Python*" 2^>nul') do if exist "C:\\Program Files\\%%D\\python.exe" set "FOUND_PYTHON=C:\\Program Files\\%%D\\python.exe"
+                if defined FOUND_PYTHON echo Found Python at %FOUND_PYTHON%
+                if defined FOUND_PYTHON goto :python_found
+
+                for /f "delims=" %%D in ('dir /b /ad "C:\\Program Files (x86)\\Python*" 2^>nul') do if exist "C:\\Program Files (x86)\\%%D\\python.exe" set "FOUND_PYTHON=C:\\Program Files (x86)\\%%D\\python.exe"
+                if defined FOUND_PYTHON echo Found Python at %FOUND_PYTHON%
+                if defined FOUND_PYTHON goto :python_found
 
                 REM 3. Search C:\\PythonXX (older-style installs)
-                for /d %%D in ("C:\\Python*") do (
-                    if exist "%%D\\python.exe" (
-                        set "FOUND_PYTHON=%%D\\python.exe"
-                        echo Found Python at %%D\\python.exe
-                        goto :python_found
-                    )
-                )
+                for /f "delims=" %%D in ('dir /b /ad "C:\\Python*" 2^>nul') do if exist "C:\\%%D\\python.exe" set "FOUND_PYTHON=C:\\%%D\\python.exe"
+                if defined FOUND_PYTHON echo Found Python at %FOUND_PYTHON%
+                if defined FOUND_PYTHON goto :python_found
 
                 REM 4. Search per-user install location (only works if Jenkins runs as that user)
-                for /d %%D in ("%LOCALAPPDATA%\\Programs\\Python\\Python*") do (
-                    if exist "%%D\\python.exe" (
-                        set "FOUND_PYTHON=%%D\\python.exe"
-                        echo Found Python in LOCALAPPDATA: %%D\\python.exe
-                        goto :python_found
-                    )
-                )
+                for /f "delims=" %%D in ('dir /b /ad "%LOCALAPPDATA%\\Programs\\Python\\Python*" 2^>nul') do if exist "%LOCALAPPDATA%\\Programs\\Python\\%%D\\python.exe" set "FOUND_PYTHON=%LOCALAPPDATA%\\Programs\\Python\\%%D\\python.exe"
+                if defined FOUND_PYTHON echo Found Python at %FOUND_PYTHON%
+                if defined FOUND_PYTHON goto :python_found
 
                 REM 5. Last resort - check the registry (covers unusual custom install paths)
-                for /f "tokens=2,*" %%A in ('reg query "HKLM\\SOFTWARE\\Python\\PythonCore" /s /v ExecutablePath 2^>nul ^| findstr /i "ExecutablePath"') do (
-                    if exist "%%B" (
-                        set "FOUND_PYTHON=%%B"
-                        echo Found Python via registry: %%B
-                        goto :python_found
-                    )
-                )
+                for /f "tokens=2,*" %%A in ('reg query "HKLM\\SOFTWARE\\Python\\PythonCore" /s /v ExecutablePath 2^>nul ^| findstr /i "ExecutablePath"') do if exist "%%B" set "FOUND_PYTHON=%%B"
+                if defined FOUND_PYTHON echo Found Python via registry: %FOUND_PYTHON%
+                if defined FOUND_PYTHON goto :python_found
 
                 echo ERROR: A real Python installation was not found anywhere checked.
-                echo Checked: py launcher, Program Files, C:\\PythonXX, LOCALAPPDATA, registry.
-                echo The WindowsApps python.exe alias is not a valid interpreter.
-                echo Install Python from python.org with "Add python.exe to PATH" and
-                echo "Install for all users" both checked, then re-run this job.
+                echo Checked: py launcher, Program Files, Program Files x86, C colon Python folders, LOCALAPPDATA, registry.
+                echo Diagnostic - anything Python-related under Program Files:
+                dir /b "C:\\Program Files" 2>nul | findstr /i python
+                dir /b "C:\\Program Files (x86)" 2>nul | findstr /i python
                 exit /b 1
 
                 :python_found
