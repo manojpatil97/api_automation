@@ -43,8 +43,8 @@ pipeline {
                 set "FOUND_PYTHON="
 
                 REM 1. Confirmed install location on this specific machine (Python 3.14's
-                REM new per-user layout: AppData\Local\Python\pythoncore-<ver>-<arch>,
-                REM which replaced the old Programs\Python\PythonXXX layout).
+                REM new per-user layout: AppData\\Local\\Python\\pythoncore-VER-ARCH,
+                REM which replaced the old Programs\\Python\\PythonXXX layout).
                 if exist "C:\\Users\\PC\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe" set "FOUND_PYTHON=C:\\Users\\PC\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe"
                 if defined FOUND_PYTHON echo Found Python at confirmed location: %FOUND_PYTHON%
                 if defined FOUND_PYTHON goto :python_found
