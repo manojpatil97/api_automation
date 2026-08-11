@@ -1,45 +1,69 @@
 pipeline {
-
     agent any
-
-    environment {
-        PYTHON = 'C:\\Users\\PC\\AppData\\Local\\Microsoft\\WindowsApps\\python.exe'
-    }
 
     stages {
 
-        stage('Setup Python') {
+        stage('Checkout') {
             steps {
-                echo 'Checking Python installation...'
+                echo 'Checking out project from Git...'
+                checkout scm
+            }
+        }
+
+        stage('Find Python') {
+            steps {
+                echo 'Searching for real Python installation...'
 
                 bat '''
-                    if not exist "%PYTHON%" (
-                        echo ERROR: Python executable was not found:
-                        echo %PYTHON%
+                    echo ==========================================
+                    echo SEARCHING FOR PYTHON
+                    echo ==========================================
+
+                    set "PYTHON_EXE="
+
+                    if exist "C:\\Program Files\\Python314\\python.exe" set "PYTHON_EXE=C:\\Program Files\\Python314\\python.exe"
+                    if exist "C:\\Program Files\\Python313\\python.exe" set "PYTHON_EXE=C:\\Program Files\\Python313\\python.exe"
+                    if exist "C:\\Program Files\\Python312\\python.exe" set "PYTHON_EXE=C:\\Program Files\\Python312\\python.exe"
+                    if exist "C:\\Program Files\\Python311\\python.exe" set "PYTHON_EXE=C:\\Program Files\\Python311\\python.exe"
+
+                    if exist "C:\\Users\\PC\\AppData\\Local\\Programs\\Python\\Python314\\python.exe" set "PYTHON_EXE=C:\\Users\\PC\\AppData\\Local\\Programs\\Python\\Python314\\python.exe"
+                    if exist "C:\\Users\\PC\\AppData\\Local\\Programs\\Python\\Python313\\python.exe" set "PYTHON_EXE=C:\\Users\\PC\\AppData\\Local\\Programs\\Python\\Python313\\python.exe"
+                    if exist "C:\\Users\\PC\\AppData\\Local\\Programs\\Python\\Python312\\python.exe" set "PYTHON_EXE=C:\\Users\\PC\\AppData\\Local\\Programs\\Python\\Python312\\python.exe"
+                    if exist "C:\\Users\\PC\\AppData\\Local\\Programs\\Python\\Python311\\python.exe" set "PYTHON_EXE=C:\\Users\\PC\\AppData\\Local\\Programs\\Python\\Python311\\python.exe"
+
+                    if not defined PYTHON_EXE (
+                        echo ERROR: Real Python installation was not found.
+                        echo.
+                        echo Jenkins cannot use:
+                        echo C:\\Users\\PC\\AppData\\Local\\Microsoft\\WindowsApps\\python.exe
+                        echo.
+                        echo Please install Python for all users.
                         exit /b 1
                     )
 
-                    echo Python executable found:
-                    echo %PYTHON%
+                    echo Python found:
+                    echo %PYTHON_EXE%
 
-                    "%PYTHON%" --version
+                    "%PYTHON_EXE%" --version
+
+                    echo %PYTHON_EXE% > python_path.txt
                 '''
             }
         }
 
         stage('Create Virtual Environment') {
             steps {
-                echo 'Creating Python virtual environment...'
+                echo 'Creating virtual environment...'
 
                 bat '''
-                    if exist "venv" (
-                        rmdir /s /q "venv"
-                    )
+                    set /p PYTHON_EXE=<python_path.txt
 
-                    "%PYTHON%" -m venv venv
-                '''
+                    if exist "venv" rmdir /s /q "venv"
 
-                bat '''
+                    "%PYTHON_EXE%" -m venv venv
+
+                    if not exist "venv\\Scripts\\python.exe" exit /b 1
+
                     venv\\Scripts\\python.exe --version
                 '''
             }
@@ -51,9 +75,6 @@ pipeline {
 
                 bat '''
                     venv\\Scripts\\python.exe -m pip install --upgrade pip
-                '''
-
-                bat '''
                     venv\\Scripts\\python.exe -m pip install -r requirements.txt
                 '''
             }
@@ -61,7 +82,7 @@ pipeline {
 
         stage('Create Reports') {
             steps {
-                echo 'Creating report directories...'
+                echo 'Creating report folders...'
 
                 bat '''
                     if not exist "reports" mkdir "reports"
@@ -71,22 +92,19 @@ pipeline {
             }
         }
 
-        stage('Run API Tests') {
+        stage('Run Tests') {
             steps {
                 echo 'Running API automation tests...'
 
                 bat '''
-                    venv\\Scripts\\python.exe -m pytest tests ^
-                    --html=reports\\html-report\\report.html ^
-                    --self-contained-html ^
-                    --alluredir=reports\\allure-report
+                    venv\\Scripts\\python.exe -m pytest tests --html=reports\\html-report\\report.html --self-contained-html
                 '''
             }
         }
 
         stage('Publish HTML Report') {
             steps {
-                echo 'Publishing Pytest HTML report...'
+                echo 'Publishing HTML report...'
 
                 publishHTML(target: [
                     reportName: 'Pytest HTML Report',
@@ -94,28 +112,13 @@ pipeline {
                     reportFiles: 'report.html',
                     keepAll: true,
                     alwaysLinkToLastBuild: true,
-                    allowMissing: false
+                    allowMissing: true
                 ])
-            }
-        }
-
-        stage('Publish Allure Report') {
-            steps {
-                echo 'Publishing Allure report...'
-
-                allure(
-                    includeProperties: false,
-                    jdk: '',
-                    results: [
-                        [path: 'reports/allure-report']
-                    ]
-                )
             }
         }
     }
 
     post {
-
         always {
             echo 'Archiving reports...'
 
@@ -126,16 +129,15 @@ pipeline {
         }
 
         success {
-            echo '============================================'
+            echo '=========================================='
             echo 'API AUTOMATION PIPELINE PASSED'
-            echo '============================================'
+            echo '=========================================='
         }
 
         failure {
-            echo '============================================'
+            echo '=========================================='
             echo 'API AUTOMATION PIPELINE FAILED'
-            echo '============================================'
+            echo '=========================================='
         }
     }
 }
- 
