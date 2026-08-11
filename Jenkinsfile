@@ -99,7 +99,7 @@ pipeline {
                 "%FOUND_PYTHON%" --version
                 REM Persist the discovered path to a file so later stages (separate
                 REM cmd.exe processes) don't have to re-discover it from scratch.
-                echo %FOUND_PYTHON%> python_path.txt
+                echo %FOUND_PYTHON%> "%WORKSPACE%\\python_path.txt"
                 echo PYTHON_OK
                 '''
             }
@@ -112,24 +112,54 @@ pipeline {
                 echo CREATING VIRTUAL ENVIRONMENT
                 echo ==========================================
 
-                if not exist python_path.txt (
+                if not exist "%WORKSPACE%\\python_path.txt" (
                     echo ERROR: python_path.txt not found - Verify Python stage did not run or failed.
                     exit /b 1
                 )
-                set /p FOUND_PYTHON=<python_path.txt
+                set /p FOUND_PYTHON=<"%WORKSPACE%\\python_path.txt"
 
                 if not exist "%FOUND_PYTHON%" (
                     echo ERROR: Recorded Python path no longer exists: %FOUND_PYTHON%
                     exit /b 1
                 )
 
-                "%FOUND_PYTHON%" -m venv %VENV_DIR%
+                "%FOUND_PYTHON%" -m venv "%WORKSPACE%\\%VENV_DIR%"
 
-                if not exist "%VENV_DIR%\\Scripts\\python.exe" (
+                if not exist "%WORKSPACE%\\%VENV_DIR%\\Scripts\\python.exe" (
                     echo ERROR: Virtual environment was not created successfully.
                     exit /b 1
                 )
                 echo VENV_OK
+                '''
+            }
+        }
+
+        stage('Locate Project Files') {
+            steps {
+                bat '''
+                echo ==========================================
+                echo LOCATING PROJECT FILES
+                echo ==========================================
+
+                set "PROJECT_DIR="
+
+                REM requirements.txt may be at the workspace root, or nested inside a
+                REM wrapper folder (e.g. "Playwright_API_Automation\\requirements.txt")
+                REM depending on how the repo is laid out - search recursively instead
+                REM of assuming the root, and use whatever directory contains it.
+                for /f "delims=" %%F in ('dir /s /b "%WORKSPACE%\\requirements.txt" 2^>nul') do set "PROJECT_DIR=%%~dpF"
+
+                if not defined PROJECT_DIR (
+                    echo WARNING: requirements.txt not found anywhere in the workspace.
+                    echo Falling back to workspace root - dependency install will likely be skipped.
+                    echo Contents of workspace root for reference:
+                    dir /b "%WORKSPACE%"
+                    set "PROJECT_DIR=%WORKSPACE%\\"
+                )
+
+                echo Project directory resolved to: %PROJECT_DIR%
+                echo %PROJECT_DIR%> "%WORKSPACE%\\project_dir.txt"
+                echo LOCATE_OK
                 '''
             }
         }
@@ -140,12 +170,15 @@ pipeline {
                 echo ==========================================
                 echo INSTALLING DEPENDENCIES
                 echo ==========================================
-                call %VENV_DIR%\\Scripts\\activate.bat
+                set /p PROJECT_DIR=<"%WORKSPACE%\\project_dir.txt"
+
+                call "%WORKSPACE%\\%VENV_DIR%\\Scripts\\activate.bat"
                 python -m pip install --upgrade pip
-                if exist requirements.txt (
-                    pip install -r requirements.txt
+
+                if exist "%PROJECT_DIR%requirements.txt" (
+                    pip install -r "%PROJECT_DIR%requirements.txt"
                 ) else (
-                    echo WARNING: No requirements.txt found - skipping dependency install.
+                    echo WARNING: No requirements.txt found at %PROJECT_DIR% - skipping dependency install.
                 )
 
                 REM This project uses playwright's API request context (see conftest.py),
@@ -163,7 +196,10 @@ pipeline {
                 echo ==========================================
                 echo RUNNING API TESTS
                 echo ==========================================
-                call %VENV_DIR%\\Scripts\\activate.bat
+                set /p PROJECT_DIR=<"%WORKSPACE%\\project_dir.txt"
+
+                call "%WORKSPACE%\\%VENV_DIR%\\Scripts\\activate.bat"
+                cd /d "%PROJECT_DIR%"
                 REM pytest.ini already adds --html=reports/html/report.html --self-contained-html
                 REM --junitxml is added here on top so Jenkins' junit step can parse results too
                 pytest --junitxml=results.xml
@@ -173,8 +209,8 @@ pipeline {
 
         stage('Publish Reports') {
             steps {
-                junit allowEmptyResults: true, testResults: 'results.xml'
-                archiveArtifacts artifacts: 'results.xml, reports/html/**', allowEmptyArchive: true
+                junit allowEmptyResults: true, testResults: '**/results.xml'
+                archiveArtifacts artifacts: '**/results.xml, **/reports/html/**', allowEmptyArchive: true
             }
         }
     }
