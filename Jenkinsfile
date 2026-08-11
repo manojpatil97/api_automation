@@ -1,40 +1,24 @@
 pipeline {
+
     agent any
 
     environment {
-        VENV_DIR = "venv"
-
-        // Python installed on this Jenkins machine
-        PYTHON_EXE = "C:\\Users\\PC\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe"
-
-        // Fix Windows PATH for Jenkins
-        PATH = "C:\\Windows\\System32;C:\\Windows;C:\\Windows\\System32\\Wbem;C:\\Windows\\System32\\WindowsPowerShell\\v1.0;C:\\Program Files\\Git\\cmd;${env.PATH}"
+        BASE_URL = 'https://app.reqres.in'
+        PYTHON_EXE = 'C:\\Users\\PC\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe'
+        VENV_PYTHON = "${WORKSPACE}\\venv\\Scripts\\python.exe"
     }
 
     stages {
 
-        stage('Verify Windows') {
+        stage('Checkout') {
             steps {
-                bat '''
-                    echo ==========================================
-                    echo VERIFYING WINDOWS
-                    echo ==========================================
+                echo '=========================================='
+                echo 'CHECKING OUT PROJECT'
+                echo '=========================================='
 
-                    echo COMSPEC=%COMSPEC%
-                    echo PATH=%PATH%
-
-                    if not exist "C:\\Windows\\System32\\cmd.exe" (
-                        echo ERROR: cmd.exe not found
-                        exit /b 1
-                    )
-
-                    ver
-
-                    echo WINDOWS_OK
-                '''
+                checkout scm
             }
         }
-
 
         stage('Verify Python') {
             steps {
@@ -43,12 +27,8 @@ pipeline {
                     echo VERIFYING PYTHON
                     echo ==========================================
 
-                    echo Python path:
-                    echo %PYTHON_EXE%
-
                     if not exist "%PYTHON_EXE%" (
-                        echo ERROR: Python executable not found
-                        echo Expected:
+                        echo ERROR: Python not found
                         echo %PYTHON_EXE%
                         exit /b 1
                     )
@@ -56,7 +36,7 @@ pipeline {
                     "%PYTHON_EXE%" --version
 
                     if errorlevel 1 (
-                        echo ERROR: Python could not be executed
+                        echo ERROR: Python cannot be executed
                         exit /b 1
                     )
 
@@ -65,7 +45,6 @@ pipeline {
             }
         }
 
-
         stage('Create Virtual Environment') {
             steps {
                 bat '''
@@ -73,63 +52,46 @@ pipeline {
                     echo CREATING VIRTUAL ENVIRONMENT
                     echo ==========================================
 
-                    if exist "%WORKSPACE%\\%VENV_DIR%" (
+                    if exist "%WORKSPACE%\\venv" (
                         echo Removing old virtual environment...
-                        rmdir /s /q "%WORKSPACE%\\%VENV_DIR%"
+                        rmdir /s /q "%WORKSPACE%\\venv"
                     )
 
-                    echo Creating new virtual environment...
-
-                    "%PYTHON_EXE%" -m venv "%WORKSPACE%\\%VENV_DIR%"
+                    "%PYTHON_EXE%" -m venv "%WORKSPACE%\\venv"
 
                     if errorlevel 1 (
                         echo ERROR: Failed to create virtual environment
                         exit /b 1
                     )
 
-                    if not exist "%WORKSPACE%\\%VENV_DIR%\\Scripts\\python.exe" (
+                    if not exist "%VENV_PYTHON%" (
                         echo ERROR: Virtual environment Python not found
                         exit /b 1
                     )
 
-                    echo Virtual environment created successfully.
-
-                    "%WORKSPACE%\\%VENV_DIR%\\Scripts\\python.exe" --version
+                    "%VENV_PYTHON%" --version
 
                     echo VENV_OK
                 '''
             }
         }
 
-
         stage('Install Dependencies') {
             steps {
                 bat '''
                     echo ==========================================
-                    echo INSTALLING PYTHON DEPENDENCIES
+                    echo INSTALLING DEPENDENCIES
                     echo ==========================================
 
                     cd /d "%WORKSPACE%"
 
-                    echo Current directory:
-                    cd
-
-                    echo.
-                    echo Checking requirements.txt...
-
                     if not exist "%WORKSPACE%\\requirements.txt" (
-                        echo ERROR: requirements.txt was not found.
-                        echo Expected location:
-                        echo %WORKSPACE%\\requirements.txt
+                        echo ERROR: requirements.txt not found
                         exit /b 1
                     )
 
-                    echo requirements.txt found.
-
-                    echo.
                     echo Upgrading pip...
-
-                    "%WORKSPACE%\\%VENV_DIR%\\Scripts\\python.exe" -m pip install --upgrade pip
+                    "%VENV_PYTHON%" -m pip install --upgrade pip
 
                     if errorlevel 1 (
                         echo ERROR: pip upgrade failed
@@ -139,37 +101,27 @@ pipeline {
                     echo.
                     echo Installing requirements.txt...
 
-                    "%WORKSPACE%\\%VENV_DIR%\\Scripts\\python.exe" -m pip install -r "%WORKSPACE%\\requirements.txt"
+                    "%VENV_PYTHON%" -m pip install -r "%WORKSPACE%\\requirements.txt"
 
                     if errorlevel 1 (
-                        echo ERROR: requirements.txt installation failed
+                        echo ERROR: Dependency installation failed
                         exit /b 1
                     )
 
                     echo.
-                    echo Installing pytest...
+                    echo Checking pytest-playwright...
 
-                    "%WORKSPACE%\\%VENV_DIR%\\Scripts\\python.exe" -m pip install pytest
+                    "%VENV_PYTHON%" -m pip show pytest-playwright
 
                     if errorlevel 1 (
-                        echo ERROR: pytest installation failed
+                        echo ERROR: pytest-playwright is not installed
                         exit /b 1
                     )
 
                     echo.
-                    echo Installing pytest-html...
+                    echo Checking pytest...
 
-                    "%WORKSPACE%\\%VENV_DIR%\\Scripts\\python.exe" -m pip install pytest-html
-
-                    if errorlevel 1 (
-                        echo ERROR: pytest-html installation failed
-                        exit /b 1
-                    )
-
-                    echo.
-                    echo Checking installed pytest...
-
-                    "%WORKSPACE%\\%VENV_DIR%\\Scripts\\python.exe" -m pytest --version
+                    "%VENV_PYTHON%" -m pytest --version
 
                     if errorlevel 1 (
                         echo ERROR: pytest is not available
@@ -184,17 +136,44 @@ pipeline {
             }
         }
 
-
-        stage('Set Environment') {
+        stage('Install Playwright Browsers') {
             steps {
-                script {
-                    env.BASE_URL = 'https://jsonplaceholder.typicode.com'
+                bat '''
+                    echo ==========================================
+                    echo INSTALLING PLAYWRIGHT BROWSERS
+                    echo ==========================================
 
-                    echo "BASE_URL = ${env.BASE_URL}"
-                }
+                    "%VENV_PYTHON%" -m playwright install chromium
+
+                    if errorlevel 1 (
+                        echo ERROR: Playwright browser installation failed
+                        exit /b 1
+                    )
+
+                    echo PLAYWRIGHT_BROWSER_OK
+                '''
             }
         }
 
+        stage('Verify Pytest Playwright Plugin') {
+            steps {
+                bat '''
+                    echo ==========================================
+                    echo VERIFYING PYTEST-PLAYWRIGHT
+                    echo ==========================================
+
+                    "%VENV_PYTHON%" -m pytest --fixtures | findstr /I "playwright"
+
+                    if errorlevel 1 (
+                        echo ERROR: playwright fixture was not found
+                        echo pytest-playwright plugin may not be loaded
+                        exit /b 1
+                    )
+
+                    echo PYTEST_PLAYWRIGHT_OK
+                '''
+            }
+        }
 
         stage('Create Reports Directory') {
             steps {
@@ -207,14 +186,10 @@ pipeline {
                         mkdir "%WORKSPACE%\\reports"
                     )
 
-                    echo Reports directory:
-                    echo %WORKSPACE%\\reports
-
                     echo REPORT_DIRECTORY_OK
                 '''
             }
         }
-
 
         stage('Run Pytest Tests') {
             steps {
@@ -230,21 +205,20 @@ pipeline {
 
                     echo.
                     echo Python version:
-                    "%WORKSPACE%\\%VENV_DIR%\\Scripts\\python.exe" --version
+                    "%VENV_PYTHON%" --version
 
                     echo.
                     echo Pytest version:
-                    "%WORKSPACE%\\%VENV_DIR%\\Scripts\\python.exe" -m pytest --version
+                    "%VENV_PYTHON%" -m pytest --version
+
+                    echo.
+                    echo BASE_URL:
+                    echo %BASE_URL%
 
                     echo.
                     echo Starting tests...
 
-                    "%WORKSPACE%\\%VENV_DIR%\\Scripts\\python.exe" -m pytest ^
-                        -v ^
-                        -o addopts="" ^
-                        --html="%WORKSPACE%\\reports\\report.html" ^
-                        --self-contained-html ^
-                        --junitxml="%WORKSPACE%\\results.xml"
+                    "%VENV_PYTHON%" -m pytest tests -v -o addopts="" --html="%WORKSPACE%\\reports\\report.html" --self-contained-html --junitxml="%WORKSPACE%\\results.xml"
 
                     if errorlevel 1 (
                         echo.
@@ -263,46 +237,40 @@ pipeline {
         }
     }
 
-
     post {
 
         always {
-            echo "Publishing test reports..."
+            echo '=========================================='
+            echo 'PUBLISHING TEST RESULTS'
+            echo '=========================================='
 
-            publishHTML([
-                allowMissing: true,
-                alwaysLinkToLastBuild: true,
-                keepAll: true,
-                reportDir: 'reports',
-                reportFiles: 'report.html',
-                reportName: 'API Automation HTML Report'
-            ])
+            junit allowEmptyResults: true,
+                  testResults: 'results.xml'
 
-            junit(
-                allowEmptyResults: true,
-                testResults: 'results.xml'
+            publishHTML(
+                target: [
+                    allowMissing: true,
+                    alwaysLinkToLastBuild: true,
+                    keepAll: true,
+                    reportDir: 'reports',
+                    reportFiles: 'report.html',
+                    reportName: 'Pytest HTML Report'
+                ]
             )
         }
 
-
         success {
-            echo "=========================================="
-            echo "JENKINS BUILD SUCCESSFUL"
-            echo "=========================================="
+            echo '=========================================='
+            echo 'BUILD SUCCESSFUL'
+            echo 'ALL PYTEST TESTS PASSED'
+            echo '=========================================='
         }
-
 
         failure {
-            echo "=========================================="
-            echo "JENKINS BUILD FAILED"
-            echo "Check the console output and HTML report."
-            echo "=========================================="
-        }
-
-
-        cleanup {
-            echo "Cleaning Jenkins workspace..."
-            deleteDir()
+            echo '=========================================='
+            echo 'BUILD FAILED'
+            echo 'CHECK PYTEST ERROR ABOVE'
+            echo '=========================================='
         }
     }
 }
