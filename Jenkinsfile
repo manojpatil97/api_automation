@@ -42,13 +42,26 @@ pipeline {
 
                 set "FOUND_PYTHON="
 
-                REM 1. Try the official py launcher first (most reliable on Windows)
+                REM 1. Confirmed install location on this specific machine (Python 3.14's
+                REM new per-user layout: AppData\Local\Python\pythoncore-<ver>-<arch>,
+                REM which replaced the old Programs\Python\PythonXXX layout).
+                if exist "C:\\Users\\PC\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe" set "FOUND_PYTHON=C:\\Users\\PC\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe"
+                if defined FOUND_PYTHON echo Found Python at confirmed location: %FOUND_PYTHON%
+                if defined FOUND_PYTHON goto :python_found
+
+                REM 1b. Same new-style layout, generalized with a wildcard so a future
+                REM Python version bump (3.15, etc.) doesn't require editing this file again.
+                for /f "delims=" %%D in ('dir /b /ad "C:\\Users\\PC\\AppData\\Local\\Python\\pythoncore-*" 2^>nul') do if exist "C:\\Users\\PC\\AppData\\Local\\Python\\%%D\\python.exe" set "FOUND_PYTHON=C:\\Users\\PC\\AppData\\Local\\Python\\%%D\\python.exe"
+                if defined FOUND_PYTHON echo Found Python at %FOUND_PYTHON%
+                if defined FOUND_PYTHON goto :python_found
+
+                REM 2. Try the official py launcher (most reliable on Windows when present)
                 py -3 --version >nul 2>&1
                 if not errorlevel 1 for /f "delims=" %%P in ('py -3 -c "import sys;print(sys.executable)" 2^>nul') do set "FOUND_PYTHON=%%P"
                 if defined FOUND_PYTHON echo Found Python via py launcher: %FOUND_PYTHON%
                 if defined FOUND_PYTHON goto :python_found
 
-                REM 2. Search Program Files (this is where "Install for all users" puts it)
+                REM 3. Search Program Files (this is where "Install for all users" puts it)
                 REM Using dir/b + for/f instead of for /d with a block body, since nested
                 REM parenthesized blocks break badly if any echoed text contains ( or ).
                 for /f "delims=" %%D in ('dir /b /ad "C:\\Program Files\\Python*" 2^>nul') do if exist "C:\\Program Files\\%%D\\python.exe" set "FOUND_PYTHON=C:\\Program Files\\%%D\\python.exe"
@@ -59,23 +72,23 @@ pipeline {
                 if defined FOUND_PYTHON echo Found Python at %FOUND_PYTHON%
                 if defined FOUND_PYTHON goto :python_found
 
-                REM 3. Search C:\\PythonXX (older-style installs)
+                REM 4. Search C:\\PythonXX (older-style installs)
                 for /f "delims=" %%D in ('dir /b /ad "C:\\Python*" 2^>nul') do if exist "C:\\%%D\\python.exe" set "FOUND_PYTHON=C:\\%%D\\python.exe"
                 if defined FOUND_PYTHON echo Found Python at %FOUND_PYTHON%
                 if defined FOUND_PYTHON goto :python_found
 
-                REM 4. Search per-user install location (only works if Jenkins runs as that user)
+                REM 5. Search old-style per-user install location (pre-3.14 layout)
                 for /f "delims=" %%D in ('dir /b /ad "%LOCALAPPDATA%\\Programs\\Python\\Python*" 2^>nul') do if exist "%LOCALAPPDATA%\\Programs\\Python\\%%D\\python.exe" set "FOUND_PYTHON=%LOCALAPPDATA%\\Programs\\Python\\%%D\\python.exe"
                 if defined FOUND_PYTHON echo Found Python at %FOUND_PYTHON%
                 if defined FOUND_PYTHON goto :python_found
 
-                REM 5. Last resort - check the registry (covers unusual custom install paths)
+                REM 6. Last resort - check the registry (covers unusual custom install paths)
                 for /f "tokens=2,*" %%A in ('reg query "HKLM\\SOFTWARE\\Python\\PythonCore" /s /v ExecutablePath 2^>nul ^| findstr /i "ExecutablePath"') do if exist "%%B" set "FOUND_PYTHON=%%B"
                 if defined FOUND_PYTHON echo Found Python via registry: %FOUND_PYTHON%
                 if defined FOUND_PYTHON goto :python_found
 
                 echo ERROR: A real Python installation was not found anywhere checked.
-                echo Checked: py launcher, Program Files, Program Files x86, C colon Python folders, LOCALAPPDATA, registry.
+                echo Checked: confirmed path, py launcher, Program Files, Program Files x86, C colon Python folders, old-style LOCALAPPDATA, registry.
                 echo Diagnostic - anything Python-related under Program Files:
                 dir /b "C:\\Program Files" 2>nul | findstr /i python
                 dir /b "C:\\Program Files (x86)" 2>nul | findstr /i python
